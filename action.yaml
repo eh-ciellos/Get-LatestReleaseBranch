@@ -1,0 +1,22 @@
+# .github/actions/Get-latestReleaseBranch/action.yml
+
+name: 'Get Latest Release Branch'
+description: 'Checks GitHub release/ branches and returns the latest'
+inputs:
+  gh_token:
+    description: 'GitHub Token'
+    required: true
+
+outputs:
+  allFoundErrors:
+    description: 'All errors found during the workflow runs'
+    value: ${{ steps.check_logs.outputs.allFoundErrors }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: 'Check Workflow Logs'
+      id: check_logs
+      shell: pwsh
+      run: |
+        try { ${{ github.action_path }}/Get-LatestReleaseBranch.ps1 -GH_TOKEN ${{ inputs.gh_token }} -REPO ${{ github.repository }} } catch { Write-Host "::Error::Unexpected error when running action ($($_.Exception.Message))"; exit 1 }
