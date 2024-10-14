@@ -8,15 +8,15 @@ inputs:
     required: true
 
 outputs:
-  allFoundErrors:
+  latestRelease:
     description: 'All errors found during the workflow runs'
-    value: ${{ steps.check_logs.outputs.allFoundErrors }}
+    value: ${{ steps.get_latest_release.outputs.latestRelease }}
 
 runs:
   using: 'composite'
   steps:
-    - name: 'Check Workflow Logs'
-      id: check_logs
+    - name: 'Get Latest Release Branch'
+      id: get_latest_release
       shell: pwsh
       run: |
         try { ${{ github.action_path }}/Get-LatestReleaseBranch.ps1 -GH_TOKEN ${{ inputs.gh_token }} -REPO ${{ github.repository }} } catch { Write-Host "::Error::Unexpected error when running action ($($_.Exception.Message))"; exit 1 }
