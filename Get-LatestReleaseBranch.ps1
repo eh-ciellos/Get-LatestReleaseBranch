@@ -1,17 +1,11 @@
 Param(
-        [Parameter(HelpMessage = "The GitHub Token running the action", Mandatory = $true)]
-        [string] $GH_TOKEN,
-        [Parameter(HelpMessage = "The GitHub repo name in 'owner/repo' format", Mandatory = $false)]
-        [string] $REPO
-    )
-function Get-LatestReleaseBranch {
-    Param(
-        [Parameter(HelpMessage = "The GitHub Token running the action", Mandatory = $true)]
-        [string] $GH_TOKEN,
-        [Parameter(HelpMessage = "The GitHub repo name in 'owner/repo' format", Mandatory = $false)]
-        [string] $REPO
-    )
+    [Parameter(HelpMessage = "The GitHub Token running the action", Mandatory = $true)]
+    [string] $GH_TOKEN,
+    [Parameter(HelpMessage = "The GitHub repo name in 'owner/repo' format", Mandatory = $false)]
+    [string] $REPO
+)
 
+function Get-LatestReleaseBranch {
     $ErrorActionPreference = "Stop"
     Set-StrictMode -Version 2.0
 
@@ -24,7 +18,9 @@ function Get-LatestReleaseBranch {
         $branches = gh api repos/$REPO/branches | ConvertFrom-Json | Where-Object { $_.name -like 'release/*' }
         
         if ($branches.Count -eq 0) {
-            return "Error: No branches starting with 'release/' found."
+            Write-Output "Error: No branches starting with 'release/' found."
+            Add-Content -Path $env:GITHUB_OUTPUT -Value "latestRelease=Error: No branches starting with 'release/' found."
+            return
         }
         
         # For each release branch, get the date of the latest commit
@@ -40,14 +36,23 @@ function Get-LatestReleaseBranch {
         $latestBranch = $latestBranches | Sort-Object Date -Descending | Select-Object -First 1
         
         if (-not $latestBranch) {
-            return "Error: No commit data found for release branches."
+            Write-Output "Error: No commit data found for release branches."
+            Add-Content -Path $env:GITHUB_OUTPUT -Value "latestRelease=Error: No commit data found for release branches."
+            return
         }
+        
+        $latestReleaseBranch = $latestBranch.Branch
 
-        # Return the latest release branch name
-        return $latestBranch.Branch
+        # Set outputs
+        Add-Content -Path $env:GITHUB_OUTPUT -Value "latestRelease=$latestReleaseBranch"
+        # Optionally set env for further use in the same job
+        Add-Content -Path $env:GITHUB_ENV -Value "latestRelease=$latestReleaseBranch"
+        
+        Write-Output "Latest release branch is: $latestReleaseBranch"
 
     } catch {
-        return "Error: An unexpected error occurred: $_"
+        Write-Host "Error: An unexpected error occurred: $_"
+        Add-Content -Path $env:GITHUB_OUTPUT -Value "latestRelease=Error: An unexpected error occurred: $_"
     }
 }
 
