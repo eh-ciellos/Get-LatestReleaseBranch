@@ -12,29 +12,42 @@ if (-not $REPO) {
 Write-Host "Searching for latest release branch in $REPO"
 
 # Set GitHub CLI token for authentication
-$env:GH_TOKEN = $GH_TOKEN
+$env:GITHUB_TOKEN = $GH_TOKEN  # GitHub CLI also recognizes GITHUB_TOKEN
+$env:GH_TOKEN = $GH_TOKEN      # Set both to be safe
 
 try {
-    # List all branches with 'release/' prefix
-    $branches = gh api repos/$REPO/branches --jq '.[] | select(.name | startswith("release/")) | .name' 2>&1
+    # Verify token works with a simple command
+    Write-Host "Testing GitHub token..."
+    gh auth status -t
     
     if ($LASTEXITCODE -ne 0) {
-        throw "Failed to fetch branches: $branches"
+        throw "GitHub token authentication failed. Please check token permissions."
     }
     
-    # Filter and sort release branches
-    $releaseBranches = $branches | Where-Object { $_ -match '^release\/\d+\.\d+' } | ForEach-Object { 
-        if ($_ -match 'release\/(\d+)\.(\d+)') {
-            $major = [int]$Matches[1]
-            $minor = [int]$Matches[2]
-            [PSCustomObject]@{
-                Name = $_
-                Major = $major
-                Minor = $minor
-                SortKey = $major * 1000 + $minor
+    # List all branches using REST API to avoid potential CLI issues
+    Write-Host "Fetching branches via GitHub API..."
+    $branchesRaw = gh api "repos/$REPO/branches" --paginate
+
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to fetch branches: $branchesRaw"
+    }
+    
+    $branches = $branchesRaw | ConvertFrom-Json
+    
+    # Filter release branches
+    Write-Host "Filtering release branches..."
+    $releaseBranches = $branches | 
+        Where-Object { $_.name -match '^release\/\d+\.\d+' } | 
+        ForEach-Object {
+            if ($_.name -match 'release\/(\d+)\.(\d+)') {
+                [PSCustomObject]@{
+                    Name = $_.name
+                    Major = [int]$Matches[1]
+                    Minor = [int]$Matches[2]
+                    SortKey = ([int]$Matches[1]) * 1000 + ([int]$Matches[2])
+                }
             }
-        }
-    } | Sort-Object -Property SortKey -Descending
+        } | Sort-Object -Property SortKey -Descending
     
     if (-not $releaseBranches -or $releaseBranches.Count -eq 0) {
         Write-Host "No release branches found"
@@ -45,7 +58,7 @@ try {
     $latestRelease = $releaseBranches[0].Name
     
     Write-Host "Latest release branch: $latestRelease"
-    echo "latestRelease=$latestRelease" >> $env:GITHUB_OUTPUT
+    Write-Output "latestRelease=$latestRelease" >> $env:GITHUB_OUTPUT
     
 } catch {
     Write-Host "::error::Error while fetching release branches: $($_.Exception.Message)"
