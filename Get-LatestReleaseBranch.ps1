@@ -1,59 +1,53 @@
-Param(
-    [Parameter(HelpMessage = "The GitHub Token running the action", Mandatory = $true)]
-    [string] $GH_TOKEN,
-    [Parameter(HelpMessage = "The GitHub repo name in 'owner/repo' format", Mandatory = $false)]
-    [string] $REPO
+param (
+    [Parameter(Mandatory=$true)]
+    [string]$GH_TOKEN,
+    [string]$REPO = $env:GITHUB_REPOSITORY
 )
 
-function Get-LatestReleaseBranch {
-    $ErrorActionPreference = "Stop"
-    Set-StrictMode -Version 2.0
-
-    # Authenticate GitHub CLI
-    $env:GITHUB_TOKEN = $GH_TOKEN
-    $GH_TOKEN | gh auth login --with-token
-    
-    try {
-        # Fetch all branches and filter for those starting with "release/"
-        $branches = gh api repos/$REPO/branches | ConvertFrom-Json | Where-Object { $_.name -like 'release/*' }
-        
-        if ($branches.Count -eq 0) {
-            Write-Output "Error: No branches starting with 'release/' found."
-            Add-Content -Path $env:GITHUB_OUTPUT -Value "latestRelease=Error: No branches starting with 'release/' found."
-            return
-        }
-        
-        # For each release branch, get the date of the latest commit
-        $latestBranches = foreach ($branch in $branches) {
-            $commit = gh api repos/$REPO/commits/$($branch.name) | ConvertFrom-Json
-            [PSCustomObject]@{
-                Branch = $branch.name
-                Date = $commit.commit.committer.date
-            }
-        }
-
-        # Sort the branches by date in descending order and take the latest one
-        $latestBranch = $latestBranches | Sort-Object Date -Descending | Select-Object -First 1
-        
-        if (-not $latestBranch) {
-            Write-Output "Error: No commit data found for release branches."
-            Add-Content -Path $env:GITHUB_OUTPUT -Value "latestRelease=Error: No commit data found for release branches."
-            return
-        }
-        
-        $latestReleaseBranch = $latestBranch.Branch
-
-        # Set outputs
-        Add-Content -Path $env:GITHUB_OUTPUT -Value "latestRelease=$latestReleaseBranch"
-        # Optionally set env for further use in the same job
-        Add-Content -Path $env:GITHUB_ENV -Value "latestRelease=$latestReleaseBranch"
-        
-        Write-Output "Latest release branch is: $latestReleaseBranch"
-
-    } catch {
-        Write-Host "Error: An unexpected error occurred: $_"
-        Add-Content -Path $env:GITHUB_OUTPUT -Value "latestRelease=Error: An unexpected error occurred: $_"
-    }
+# Ensure REPO is set
+if (-not $REPO) {
+    throw "Repository not specified. Use -REPO parameter or ensure GITHUB_REPOSITORY environment variable is set."
 }
 
-Get-LatestReleaseBranch -GH_TOKEN $GH_TOKEN -REPO $REPO
+Write-Host "Searching for latest release branch in $REPO"
+
+# Set GitHub CLI token for authentication
+$env:GH_TOKEN = $GH_TOKEN
+
+try {
+    # List all branches with 'release/' prefix
+    $branches = gh api repos/$REPO/branches --jq '.[] | select(.name | startswith("release/")) | .name' 2>&1
+    
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to fetch branches: $branches"
+    }
+    
+    # Filter and sort release branches
+    $releaseBranches = $branches | Where-Object { $_ -match '^release\/\d+\.\d+' } | ForEach-Object { 
+        if ($_ -match 'release\/(\d+)\.(\d+)') {
+            $major = [int]$Matches[1]
+            $minor = [int]$Matches[2]
+            [PSCustomObject]@{
+                Name = $_
+                Major = $major
+                Minor = $minor
+                SortKey = $major * 1000 + $minor
+            }
+        }
+    } | Sort-Object -Property SortKey -Descending
+    
+    if (-not $releaseBranches -or $releaseBranches.Count -eq 0) {
+        Write-Host "No release branches found"
+        exit 1
+    }
+    
+    # Get latest release branch
+    $latestRelease = $releaseBranches[0].Name
+    
+    Write-Host "Latest release branch: $latestRelease"
+    echo "latestRelease=$latestRelease" >> $env:GITHUB_OUTPUT
+    
+} catch {
+    Write-Host "::error::Error while fetching release branches: $($_.Exception.Message)"
+    exit 1
+}
